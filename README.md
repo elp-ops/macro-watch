@@ -1,27 +1,38 @@
 # Macro Watch
 
-Automated macro research agent for tracking market and geopolitical signals against a long-term investment thesis.
+Automated macro research system for tracking market and geopolitical signals against a long-term investment thesis.
 
 ## Problem
 
-Tracking macro conditions (rates, oil, commodities, AI, crypto, geopolitics) across podcasts, articles, and research means manually cross-referencing new information against everything already known. That doesn't scale.
+Tracking macro conditions (rates, oil, commodities, AI, crypto, geopolitics) across podcasts, filings, and structured data means manually cross-referencing new information against everything already known. That doesn't scale.
 
 ## Approach
 
-An agent pipeline that:
+Independent scouts, each watching one data source, feeding a shared thesis:
 
-1. Takes a trigger (scheduled or manual) with a topic or asset to research
-2. Searches for current news and analysis (Tavily API)
-3. Synthesises findings against a persistent, rolling thesis
-4. Flags confirmations, contradictions, and shifts explicitly
-5. Outputs a structured summary
+1. Each scout monitors its source on a schedule and outputs a signal
+2. New signals are logged and drafted into a synthesis against the current thesis (confirms, contradicts, or introduces something new)
+3. A human review step gates anything before it's merged into the thesis
+4. A consensus layer (once multiple scouts are live) flags when independent signals align
 
 The thesis is never reset. Every new input is checked against what's already there.
 
-## Stack (planned)
+## Roadmap
 
-Python, Tavily API (search), Anthropic Claude (synthesis), Notion (thesis storage).
+| Component | Status |
+|---|---|
+| [MacroVoices scout](scouts/macrovoices/) | Designed, implementation next |
+| [CFTC Commitment of Traders scout](scouts/cftc-cot/) | Planned |
+| [FRED macro data scout](scouts/fred-macro-data/) | Planned |
+| [Insider + institutional flow scout](scouts/sec-edgar-flow/) | Planned |
+| [Congressional trading scout](scouts/congressional-trading/) | Planned |
+| [Consensus layer](scouts/consensus-layer/) | Planned |
+| [Telegram Q&A bot](telegram-bot/) | Planned |
+
+## Stack
+
+Python, Claude (synthesis), Notion (thesis storage), Claude Code Routines (cloud scheduling). Per-scout data sources documented in each scout's README.
 
 ## Status
 
-Early stage. Core research loop not yet built. This repo tracks development as it happens.
+Early stage. First scout (MacroVoices) has a full design spec, see [`docs/superpowers/specs/`](docs/superpowers/specs/). Implementation not yet started.
