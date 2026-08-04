@@ -1,3 +1,4 @@
+import logging
 import os
 from collections import namedtuple
 from pathlib import Path
@@ -49,11 +50,12 @@ def get_transcript(video_id: str) -> TranscriptResult:
         snippets = api.fetch(video_id)
         text = " ".join(s.text for s in snippets)
         return TranscriptResult(video_id, text, "captions")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"Captions failed for video_id={video_id}, falling back to Gemini: {e}")
 
     try:
         text = call_gemini_transcript(video_id)
         return TranscriptResult(video_id, text, "gemini")
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Gemini transcript failed for video_id={video_id}: {e}")
         return TranscriptResult(video_id, None, "failed")
