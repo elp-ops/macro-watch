@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import os
 import re
 
@@ -16,6 +17,8 @@ _notion_client = Client(auth=os.getenv("NOTION_API_KEY"))
 
 MODEL = "claude-sonnet-5"
 
+RICH_TEXT_MAX_CHARS = 1900  # safe margin under Notion's 2000-char rich_text content cap
+
 MATERIALITY_PROMPT = """You maintain Elena's rolling macro/crypto investment thesis. Below is the FULL current
 thesis page (Today/This Week Snapshot, Operating Thesis, Key Levels, and Decision Tree sections), followed by
 summaries of new content logged today.
@@ -27,7 +30,7 @@ New content today:
 {new_content}
 
 Does any of this new content confirm, contradict, or add a materially new angle to ANY part of the current
-thesis above — not just the Snapshot section, but also the Operating Thesis, Key Levels, or Decision Tree
+thesis above, not just the Snapshot section, but also the Operating Thesis, Key Levels, or Decision Tree
 (a contradiction can live in the deeper sections just as easily as the Snapshot; do not limit your check to
 the Snapshot bullets)? Restating something already covered does not count. If yes, respond:
 MATERIAL: true
@@ -50,8 +53,15 @@ def fetch_page_plain_text(page_id: str) -> str:
             for block in resp["results"]:
                 block_type = block["type"]
                 data = block.get(block_type, {})
-                rich_text = data.get("rich_text", [])
-                text = "".join(rt.get("plain_text", "") for rt in rich_text)
+                if block_type == "table_row":
+                    cell_texts = [
+                        "".join(rt.get("plain_text", "") for rt in cell)
+                        for cell in data.get("cells", [])
+                    ]
+                    text = " | ".join(cell_texts)
+                else:
+                    rich_text = data.get("rich_text", [])
+                    text = "".join(rt.get("plain_text", "") for rt in rich_text)
                 if text:
                     lines.append(text)
                 if block.get("has_children"):
@@ -74,24 +84,37 @@ def assess_materiality(new_content_summaries: list[str], current_thesis: str) ->
     text = response.content[0].text
     if re.search(r"MATERIAL:\s*true", text, re.IGNORECASE):
         update_match = re.search(r"UPDATE:\s*(.+)", text, re.DOTALL)
-        return update_match.group(1).strip() if update_match else None
+        if update_match:
+            return update_match.group(1).strip()
+        logging.warning(
+            "assess_materiality: MATERIAL: true but UPDATE: could not be parsed. Raw response: %s", text
+        )
+        return f"(materiality flagged but UPDATE text could not be cleanly parsed) {text[:500]}"
     return None
+
+
+def _chunk_text(text: str, max_chars: int) -> list[str]:
+    return [text[i:i + max_chars] for i in range(0, len(text), max_chars)] or [""]
 
 
 def append_archive_entry(date: datetime.date, run_summary: str) -> None:
     guard_against_original_thesis(config.DAILY_LOGS_ARCHIVE_ID)  # no-op here, but keeps the guard pattern consistent
     date_str = date.isoformat()
+    summary_blocks = [
+        {
+            "object": "block", "type": "paragraph",
+            "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]},
+        }
+        for chunk in _chunk_text(run_summary, RICH_TEXT_MAX_CHARS)
+    ]
     _notion_client.blocks.children.append(
         block_id=config.DAILY_LOGS_ARCHIVE_ID,
         children=[{
             "object": "block",
             "type": "toggle",
             "toggle": {
-                "rich_text": [{"type": "text", "text": {"content": f"{date_str} – Daily scout run"}}],
-                "children": [{
-                    "object": "block", "type": "paragraph",
-                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": run_summary}}]},
-                }],
+                "rich_text": [{"type": "text", "text": {"content": f"{date_str}: Daily scout run"}}],
+                "children": summary_blocks,
             },
         }],
     )

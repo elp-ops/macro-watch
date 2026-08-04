@@ -34,6 +34,26 @@ def test_append_archive_entry_calls_notion():
         thesis_updater.append_archive_entry(datetime.date(2026, 8, 5), "Test run summary, nothing material.")
     assert mock_client.blocks.children.append.called
 
+def test_append_archive_entry_chunks_long_summary_into_multiple_blocks():
+    long_summary = "x" * 5000  # exceeds the 1900-char safe margin under Notion's 2000-char rich_text cap
+    with patch("thesis_updater._notion_client") as mock_client:
+        thesis_updater.append_archive_entry(datetime.date(2026, 8, 5), long_summary)
+    call_kwargs = mock_client.blocks.children.append.call_args.kwargs
+    summary_blocks = call_kwargs["children"][0]["toggle"]["children"]
+    assert len(summary_blocks) > 1
+    for block in summary_blocks:
+        content = block["paragraph"]["rich_text"][0]["text"]["content"]
+        assert len(content) <= thesis_updater.RICH_TEXT_MAX_CHARS
+    reassembled = "".join(b["paragraph"]["rich_text"][0]["text"]["content"] for b in summary_blocks)
+    assert reassembled == long_summary
+
+def test_assess_materiality_falls_back_when_update_text_unparseable():
+    with patch("thesis_updater._client") as mock_client:
+        mock_client.messages.create.return_value = _fake_anthropic_response("MATERIAL: true\nsomething is material but no marker line follows")
+        result = thesis_updater.assess_materiality(["something happened"], "full thesis text")
+    assert result is not None
+    assert "something is material" in result
+
 def test_fetch_page_plain_text_walks_children_and_paginates():
     with patch("thesis_updater._notion_client") as mock_client:
         page1 = {
@@ -75,3 +95,28 @@ def test_fetch_page_plain_text_walks_children_and_paginates():
     assert "Bond market is the story." in text
     assert "Nested child of b2." in text
     assert "Second top-level block." in text
+
+def test_fetch_page_plain_text_extracts_table_row_cells():
+    with patch("thesis_updater._notion_client") as mock_client:
+        page = {
+            "results": [
+                {
+                    "id": "row1", "type": "table_row",
+                    "table_row": {
+                        "cells": [
+                            [{"plain_text": "10Y danger band"}],
+                            [{"plain_text": "4.6"}, {"plain_text": "-4.8%"}],
+                        ]
+                    },
+                    "has_children": False,
+                },
+            ],
+            "has_more": False,
+            "next_cursor": None,
+        }
+        mock_client.blocks.children.list.return_value = page
+        text = thesis_updater.fetch_page_plain_text("page-with-table")
+
+    assert "10Y danger band" in text
+    assert "4.6-4.8%" in text
+    assert " | " in text

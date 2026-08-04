@@ -41,6 +41,9 @@ Write a Notion page body in this exact structure (markdown):
 ## Risks / Contradictions
 [Caveats, low-confidence framing, internal contradictions]
 
+## Filtered out
+{filtered_out_block}
+
 Do not invent claims not present in the transcripts. If a number or fact is unclear, say so rather than guessing."""
 
 EPISODE_PROMPT = """You are writing a Notion page summary for a MacroVoices podcast episode, for Elena's rolling macro investment thesis.
@@ -86,12 +89,17 @@ def classify_video(title: str, transcript_text: str) -> VideoClassification:
     )
 
 
-def write_digest_summary(channel_name: str, date, videos: list[dict]) -> str:
+def write_digest_summary(channel_name: str, date, videos: list[dict], filtered_out: list[dict] = None) -> str:
     videos_block = "\n\n".join(
         f"### Video: {v['title']}\n{v['transcript'][:8000]}" for v in videos
     )
+    if filtered_out:
+        filtered_out_block = "\n".join(f"- {v['title']}: {v['reason']}" for v in filtered_out)
+    else:
+        filtered_out_block = "Nothing filtered out today."
     prompt = DIGEST_PROMPT.format(
-        channel=channel_name, date=date.isoformat(), count=len(videos), videos_block=videos_block
+        channel=channel_name, date=date.isoformat(), count=len(videos), videos_block=videos_block,
+        filtered_out_block=filtered_out_block,
     )
     response = _client.messages.create(
         model=MODEL,

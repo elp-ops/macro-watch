@@ -24,3 +24,21 @@ def test_create_digest_page_returns_url():
         )
     assert url == "https://notion.so/abc123"
     assert mock_client.pages.create.called
+
+def test_create_episode_page_chunks_more_than_100_blocks():
+    long_summary = "\n".join(f"Line {i}" for i in range(150))  # 150 non-empty lines -> 150 blocks
+    with patch("notion_writer._client") as mock_client:
+        mock_client.pages.create.return_value = {"id": "page-1", "url": "https://notion.so/page1"}
+        notion_writer.create_episode_page(
+            "Test Episode", "Some Speaker", datetime.date(2026, 8, 5), long_summary, "v1", "transcript text"
+        )
+
+    first_call_children = mock_client.pages.create.call_args_list[0].kwargs["children"]
+    assert len(first_call_children) == 100
+
+    append_calls = mock_client.blocks.children.append.call_args_list
+    # at least one append batch carries the remaining 50 summary blocks (plus the transcript subpage's own create call)
+    summary_append_batches = [c for c in append_calls if c.kwargs["block_id"] == "page-1"]
+    assert len(summary_append_batches) >= 1
+    total_appended = sum(len(c.kwargs["children"]) for c in summary_append_batches)
+    assert total_appended == 50

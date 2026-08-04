@@ -13,6 +13,8 @@ _NS = {
     "yt": "http://www.youtube.com/xml/schemas/2015",
 }
 
+MAX_VIDEO_AGE_DAYS = 14  # avoid a cold-ledger flood processing weeks of backlog in one run
+
 
 def parse_feed_xml(xml_text: str, channel_name: str) -> list[VideoEntry]:
     root = ET.fromstring(xml_text)
@@ -30,4 +32,6 @@ def fetch_recent_videos(channel: "config.Channel") -> list[VideoEntry]:
     url = config.RSS_URL_TEMPLATE.format(channel_id=channel.channel_id)
     response = requests.get(url, timeout=15)
     response.raise_for_status()
-    return parse_feed_xml(response.text, channel_name=channel.name)
+    entries = parse_feed_xml(response.text, channel_name=channel.name)
+    cutoff = datetime.date.today() - datetime.timedelta(days=MAX_VIDEO_AGE_DAYS)
+    return [e for e in entries if e.published >= cutoff]

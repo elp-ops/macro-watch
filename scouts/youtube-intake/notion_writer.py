@@ -43,8 +43,23 @@ def _markdown_to_paragraph_blocks(markdown: str) -> list[dict]:
     return blocks
 
 
+NOTION_MAX_CHILDREN_PER_CALL = 100
+
+
+def _create_page_with_chunked_children(parent: dict, icon: dict, properties: dict, children: list[dict]) -> dict:
+    """pages.create only accepts up to 100 children blocks per call. Create with the first batch,
+    then append the rest in batches of 100 via blocks.children.append."""
+    first_batch, remaining = children[:NOTION_MAX_CHILDREN_PER_CALL], children[NOTION_MAX_CHILDREN_PER_CALL:]
+    page = _client.pages.create(parent=parent, icon=icon, properties=properties, children=first_batch)
+    for i in range(0, len(remaining), NOTION_MAX_CHILDREN_PER_CALL):
+        batch = remaining[i:i + NOTION_MAX_CHILDREN_PER_CALL]
+        _client.blocks.children.append(block_id=page["id"], children=batch)
+    return page
+
+
 def _create_transcript_subpage(parent_page_id: str, title: str, transcript_text: str) -> str:
-    page = _client.pages.create(
+    guard_against_original_thesis(parent_page_id)
+    page = _create_page_with_chunked_children(
         parent={"page_id": parent_page_id},
         icon={"type": "emoji", "emoji": "\U0001F4DD"},
         properties={"title": {"title": _rich_text(title)}},
@@ -55,8 +70,8 @@ def _create_transcript_subpage(parent_page_id: str, title: str, transcript_text:
 
 def create_digest_page(channel_name: str, date: datetime.date, summary_markdown: str, videos: list[dict]) -> str:
     date_str = date.strftime("%d %b %Y")
-    title = f"{channel_name} – Daily Digest ({date_str})"
-    page = _client.pages.create(
+    title = f"{channel_name}: Daily Digest ({date_str})"
+    page = _create_page_with_chunked_children(
         parent={"data_source_id": config.NOTION_SOURCES_DATA_SOURCE_ID},
         icon={"type": "emoji", "emoji": "\U0001F3A5"},
         properties={
@@ -73,7 +88,7 @@ def create_digest_page(channel_name: str, date: datetime.date, summary_markdown:
 
 
 def create_episode_page(title: str, speaker: str, date: datetime.date, summary_markdown: str, video_id: str, transcript_text: str) -> str:
-    page = _client.pages.create(
+    page = _create_page_with_chunked_children(
         parent={"data_source_id": config.NOTION_SOURCES_DATA_SOURCE_ID},
         icon={"type": "emoji", "emoji": "\U0001F30E"},
         properties={
