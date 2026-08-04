@@ -3,3 +3,4 @@ brief.md
 __pycache__/
 *.pyc
 .DS_Store
+.claude/worktrees/
