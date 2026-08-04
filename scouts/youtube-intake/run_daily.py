@@ -105,7 +105,7 @@ def main() -> None:
                 )
         except Exception as exc:
             logging.warning("materiality check failed: %s", exc)
-            run_summary += f"\n\n**MATERIALITY CHECK FAILED - not assessed this run:** {exc}"
+            run_summary += f"\n\n**MATERIALITY CHECK FAILED (not assessed this run):** {exc}"
 
     thesis_updater.append_archive_entry(today, run_summary)
 
