@@ -1,0 +1,95 @@
+import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
+
+import config
+import rss
+import ledger
+import transcript
+import synthesize
+import notion_writer
+import thesis_updater
+
+LEDGER_PATH = Path(__file__).parent / "processed.json"
+
+
+def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dict]:
+    entries = rss.fetch_recent_videos(channel)
+    groups = ledger.group_new_videos(entries, led)
+    summaries = []
+
+    for (channel_name, date), videos in groups.items():
+        real_content_videos = []
+        for video in videos:
+            result = transcript.get_transcript(video.video_id)
+            if result.text is None:
+                led.mark_processed(video.video_id, "")  # flagged/skipped, don't retry forever
+                continue
+            classification = synthesize.classify_video(video.title, result.text)
+            if classification.has_real_content:
+                real_content_videos.append({
+                    "title": video.title, "video_id": video.video_id, "transcript": result.text,
+                })
+            led.mark_processed(video.video_id, "")
+
+        if not real_content_videos:
+            continue
+
+        if channel.format == "episode":
+            for v in real_content_videos:
+                summary_md = synthesize.write_episode_summary(v["title"], channel_name, v["transcript"])
+                url = notion_writer.create_episode_page(
+                    v["title"], channel_name, date, summary_md, v["video_id"], v["transcript"]
+                )
+                led.mark_processed(v["video_id"], url)
+                summaries.append({"one_liner": f"{channel_name}: {v['title']} -> {url}", "content": summary_md})
+        else:
+            summary_md = synthesize.write_digest_summary(channel_name, date, real_content_videos)
+            url = notion_writer.create_digest_page(channel_name, date, summary_md, real_content_videos)
+            for v in real_content_videos:
+                led.mark_processed(v["video_id"], url)
+            summaries.append({
+                "one_liner": f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}",
+                "content": summary_md,
+            })
+
+    return summaries
+
+
+def main() -> None:
+    led = ledger.Ledger.load(LEDGER_PATH)
+    all_entries: list[dict] = []
+
+    for channel in config.CHANNELS:
+        try:
+            all_entries.extend(process_channel(channel, led))
+        except Exception as exc:
+            all_entries.append({"one_liner": f"{channel.name}: RUN FAILED - {exc}", "content": ""})
+
+    led.save(LEDGER_PATH)
+
+    today = datetime.date.today()
+    if not all_entries:
+        thesis_updater.append_archive_entry(today, "No new content across any of the 4 channels today.")
+        return
+
+    run_summary = "\n".join(e["one_liner"] for e in all_entries)
+
+    content_summaries = [e["content"] for e in all_entries if e["content"]]
+    if content_summaries:
+        current_thesis = thesis_updater.fetch_page_plain_text(config.THESIS_PAGE_ID)
+        material_update = thesis_updater.assess_materiality(content_summaries, current_thesis)
+        if material_update:
+            run_summary += (
+                "\n\n**MATERIAL UPDATE FLAGGED — needs a manual Snapshot/Operating Thesis rewrite:**\n"
+                + material_update
+            )
+
+    thesis_updater.append_archive_entry(today, run_summary)
+
+
+if __name__ == "__main__":
+    main()
