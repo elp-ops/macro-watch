@@ -1,4 +1,5 @@
 import datetime
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,27 +34,37 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
                 real_content_videos.append({
                     "title": video.title, "video_id": video.video_id, "transcript": result.text,
                 })
-            led.mark_processed(video.video_id, "")
+            else:
+                led.mark_processed(video.video_id, "")
 
         if not real_content_videos:
             continue
 
-        if channel.format == "episode":
-            for v in real_content_videos:
-                summary_md = synthesize.write_episode_summary(v["title"], channel_name, v["transcript"])
-                url = notion_writer.create_episode_page(
-                    v["title"], channel_name, date, summary_md, v["video_id"], v["transcript"]
-                )
-                led.mark_processed(v["video_id"], url)
-                summaries.append({"one_liner": f"{channel_name}: {v['title']} -> {url}", "content": summary_md})
-        else:
-            summary_md = synthesize.write_digest_summary(channel_name, date, real_content_videos)
-            url = notion_writer.create_digest_page(channel_name, date, summary_md, real_content_videos)
-            for v in real_content_videos:
-                led.mark_processed(v["video_id"], url)
+        try:
+            if channel.format == "episode":
+                for v in real_content_videos:
+                    summary_md = synthesize.write_episode_summary(v["title"], channel_name, v["transcript"])
+                    url = notion_writer.create_episode_page(
+                        v["title"], channel_name, date, summary_md, v["video_id"], v["transcript"]
+                    )
+                    led.mark_processed(v["video_id"], url)
+                    summaries.append({"one_liner": f"{channel_name}: {v['title']} -> {url}", "content": summary_md})
+            else:
+                summary_md = synthesize.write_digest_summary(channel_name, date, real_content_videos)
+                url = notion_writer.create_digest_page(channel_name, date, summary_md, real_content_videos)
+                for v in real_content_videos:
+                    led.mark_processed(v["video_id"], url)
+                summaries.append({
+                    "one_liner": f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}",
+                    "content": summary_md,
+                })
+        except Exception as exc:
+            logging.warning(
+                "synthesis/write failed for %s (%s): %s", channel_name, date, exc
+            )
             summaries.append({
-                "one_liner": f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}",
-                "content": summary_md,
+                "one_liner": f"{channel_name} ({date}): synthesis/write FAILED - {exc}",
+                "content": "",
             })
 
     return summaries

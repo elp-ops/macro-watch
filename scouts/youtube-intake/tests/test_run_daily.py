@@ -50,6 +50,43 @@ def test_process_channel_skips_promo_only_videos():
     assert not mock_create.called
     assert led.is_processed("v1")  # still marked so we don't re-check it every day
 
+def test_process_channel_digest_write_failure_does_not_mark_ledger_and_logs_failed_entry():
+    channel = config.CHANNELS[1]  # Krown, digest format
+    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    fake_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
+
+    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+         patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
+         patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
+         patch("run_daily.synthesize.write_digest_summary", return_value="## AI Summary\ntest"), \
+         patch("run_daily.notion_writer.create_digest_page", side_effect=RuntimeError("Notion API 500")):
+        summaries = run_daily.process_channel(channel, led)
+
+    assert not led.is_processed("v1")
+    assert len(summaries) == 1
+    assert summaries[0]["content"] == ""
+    assert "Krown" in summaries[0]["one_liner"]
+    assert "synthesis/write FAILED" in summaries[0]["one_liner"]
+    assert "Notion API 500" in summaries[0]["one_liner"]
+
+def test_process_channel_episode_write_failure_does_not_mark_ledger_and_logs_failed_entry():
+    channel = config.CHANNELS[0]  # MacroVoices, episode format
+    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    fake_entry = VideoEntry("v1", "Real Signal Episode", datetime.date(2026, 8, 5), "MacroVoices")
+
+    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+         patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
+         patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
+         patch("run_daily.synthesize.write_episode_summary", return_value="## AI Summary\ntest"), \
+         patch("run_daily.notion_writer.create_episode_page", side_effect=RuntimeError("rate limited")):
+        summaries = run_daily.process_channel(channel, led)
+
+    assert not led.is_processed("v1")
+    assert len(summaries) == 1
+    assert summaries[0]["content"] == ""
+    assert "synthesis/write FAILED" in summaries[0]["one_liner"]
+    assert "rate limited" in summaries[0]["one_liner"]
+
 def test_main_assesses_materiality_against_full_thesis_and_flags_archive():
     fake_channel = MagicMock()
     with patch("run_daily.config.CHANNELS", [fake_channel]), \
