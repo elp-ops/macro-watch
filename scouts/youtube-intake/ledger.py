@@ -1,5 +1,6 @@
 import json
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 
 from rss import VideoEntry
@@ -26,7 +27,7 @@ class Ledger:
         path.write_text(json.dumps(self._data, indent=2, sort_keys=True))
 
 
-def group_new_videos(entries: list[VideoEntry], ledger: Ledger) -> dict:
+def group_new_videos(entries: list[VideoEntry], ledger: Ledger) -> dict[tuple[str, date], list[VideoEntry]]:
     groups = defaultdict(list)
     for entry in entries:
         if ledger.is_processed(entry.video_id):
