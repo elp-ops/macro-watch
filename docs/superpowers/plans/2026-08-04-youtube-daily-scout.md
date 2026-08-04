@@ -884,7 +884,8 @@ git commit -m "scout: add Notion writer with hard guard against original thesis 
 **Interfaces:**
 - Consumes: `notion_writer._client`, `notion_writer.guard_against_original_thesis`, `synthesize._client`, `config.THESIS_PAGE_ID`, `config.DAILY_LOGS_ARCHIVE_ID`.
 - Produces: `thesis_updater.append_archive_entry(date: "datetime.date", run_summary: str) -> None` — always called once per run, even when nothing material happened.
-- Produces: `thesis_updater.assess_materiality(new_content_summaries: list[str], current_snapshot: str) -> str | None` — returns a markdown snapshot-update block if the new content is material, or `None` if not.
+- Produces: `thesis_updater.fetch_page_plain_text(page_id: str) -> str` — recursively walks a Notion page's block tree and returns a flat plain-text rendering, for feeding full-document context to an LLM prompt (not for re-writing the page, formatting is not preserved).
+- Produces: `thesis_updater.assess_materiality(new_content_summaries: list[str], current_thesis: str) -> str | None` — returns a markdown snapshot-update block if the new content is material, or `None` if not. `current_thesis` must be the FULL thesis page content (Snapshot + Operating Thesis + Key Levels + Decision Tree), not just the Snapshot section — a contradiction can live in the Operating Thesis just as easily as the Snapshot (see the 3 Aug 2026 manual correction to the Operating Thesis section as the reference case). Comparing only against the Snapshot excerpt was flagged as a real gap and fixed before this task was implemented, not after.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -908,7 +909,7 @@ def _fake_anthropic_response(text: str):
 def test_assess_materiality_returns_none_when_not_material():
     with patch("thesis_updater._client") as mock_client:
         mock_client.messages.create.return_value = _fake_anthropic_response("MATERIAL: false")
-        result = thesis_updater.assess_materiality(["minor BTC clip, no new signal"], "current snapshot text")
+        result = thesis_updater.assess_materiality(["minor BTC clip, no new signal"], "full thesis text")
     assert result is None
 
 def test_assess_materiality_returns_block_when_material():
@@ -916,7 +917,7 @@ def test_assess_materiality_returns_block_when_material():
         mock_client.messages.create.return_value = _fake_anthropic_response(
             "MATERIAL: true\nUPDATE:\n- New Fed hike signal confirmed"
         )
-        result = thesis_updater.assess_materiality(["Fed hiked rates unexpectedly"], "current snapshot text")
+        result = thesis_updater.assess_materiality(["Fed hiked rates unexpectedly"], "full thesis text")
     assert result is not None
     assert "Fed hike" in result
 
@@ -924,6 +925,48 @@ def test_append_archive_entry_calls_notion():
     with patch("thesis_updater._notion_client") as mock_client:
         thesis_updater.append_archive_entry(datetime.date(2026, 8, 5), "Test run summary, nothing material.")
     assert mock_client.blocks.children.append.called
+
+def test_fetch_page_plain_text_walks_children_and_paginates():
+    with patch("thesis_updater._notion_client") as mock_client:
+        page1 = {
+            "results": [
+                {"id": "b1", "type": "heading_2", "heading_2": {"rich_text": [{"plain_text": "Snapshot"}]}, "has_children": False},
+                {"id": "b2", "type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "Bond market is the story."}]}, "has_children": True},
+            ],
+            "has_more": True,
+            "next_cursor": "cursor-2",
+        }
+        page2 = {
+            "results": [
+                {"id": "b3", "type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "Second top-level block."}]}, "has_children": False},
+            ],
+            "has_more": False,
+            "next_cursor": None,
+        }
+        child_page = {
+            "results": [
+                {"id": "b2a", "type": "paragraph", "paragraph": {"rich_text": [{"plain_text": "Nested child of b2."}]}, "has_children": False},
+            ],
+            "has_more": False,
+            "next_cursor": None,
+        }
+
+        def _list(block_id, start_cursor=None):
+            if block_id == "page-1" and start_cursor is None:
+                return page1
+            if block_id == "page-1" and start_cursor == "cursor-2":
+                return page2
+            if block_id == "b2":
+                return child_page
+            raise AssertionError(f"unexpected call: {block_id}, {start_cursor}")
+
+        mock_client.blocks.children.list.side_effect = _list
+        text = thesis_updater.fetch_page_plain_text("page-1")
+
+    assert "Snapshot" in text
+    assert "Bond market is the story." in text
+    assert "Nested child of b2." in text
+    assert "Second top-level block." in text
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -950,28 +993,58 @@ _notion_client = Client(auth=os.getenv("NOTION_API_KEY"))
 
 MODEL = "claude-sonnet-5"
 
-MATERIALITY_PROMPT = """You maintain Elena's rolling macro/crypto investment thesis. Below is the current
-"Today / This Week Snapshot" section, followed by summaries of new content logged today.
+MATERIALITY_PROMPT = """You maintain Elena's rolling macro/crypto investment thesis. Below is the FULL current
+thesis page (Today/This Week Snapshot, Operating Thesis, Key Levels, and Decision Tree sections), followed by
+summaries of new content logged today.
 
-Current snapshot:
-{current_snapshot}
+Current thesis (full page):
+{current_thesis}
 
 New content today:
 {new_content}
 
-Does any of this new content confirm, contradict, or add a materially new angle to the current thesis
-(not just restate something already there)? If yes, respond:
+Does any of this new content confirm, contradict, or add a materially new angle to ANY part of the current
+thesis above — not just the Snapshot section, but also the Operating Thesis, Key Levels, or Decision Tree
+(a contradiction can live in the deeper sections just as easily as the Snapshot; do not limit your check to
+the Snapshot bullets)? Restating something already covered does not count. If yes, respond:
 MATERIAL: true
 UPDATE:
-- <bulleted update points, in the same style as the existing snapshot>
+- <bulleted update points, in the same style as the existing snapshot, noting which section(s) are affected>
 
 If no:
 MATERIAL: false"""
 
 
-def assess_materiality(new_content_summaries: list[str], current_snapshot: str) -> str | None:
+def fetch_page_plain_text(page_id: str) -> str:
+    """Recursively flatten a Notion page's block tree to plain text for LLM context. Formatting (bold,
+    colors, callout/table structure) is not preserved — this is read-only context, never used to write back."""
+    lines: list[str] = []
+
+    def _walk(block_id: str) -> None:
+        cursor = None
+        while True:
+            resp = _notion_client.blocks.children.list(block_id=block_id, start_cursor=cursor)
+            for block in resp["results"]:
+                block_type = block["type"]
+                data = block.get(block_type, {})
+                rich_text = data.get("rich_text", [])
+                text = "".join(rt.get("plain_text", "") for rt in rich_text)
+                if text:
+                    lines.append(text)
+                if block.get("has_children"):
+                    _walk(block["id"])
+            if resp.get("has_more"):
+                cursor = resp["next_cursor"]
+            else:
+                break
+
+    _walk(page_id)
+    return "\n".join(lines)
+
+
+def assess_materiality(new_content_summaries: list[str], current_thesis: str) -> str | None:
     new_content = "\n\n".join(new_content_summaries)
-    prompt = MATERIALITY_PROMPT.format(current_snapshot=current_snapshot, new_content=new_content)
+    prompt = MATERIALITY_PROMPT.format(current_thesis=current_thesis, new_content=new_content)
     response = _client.messages.create(
         model=MODEL, max_tokens=1500, messages=[{"role": "user", "content": prompt}]
     )
@@ -1004,7 +1077,7 @@ def append_archive_entry(date: datetime.date, run_summary: str) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd scouts/youtube-intake && python -m pytest tests/test_thesis_updater.py -v`
-Expected: PASS (3 tests)
+Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1023,8 +1096,8 @@ git commit -m "scout: add thesis materiality assessment and archive logging"
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-7.
-- Produces: `run_daily.main() -> None` — the Railway cron entrypoint.
-- Produces: `run_daily.process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[str]` — returns a list of one-line summaries of what was logged, for the archive entry.
+- Produces: `run_daily.main() -> None` — the Railway cron entrypoint. Calls `thesis_updater.fetch_page_plain_text` + `thesis_updater.assess_materiality` on every run that logged real content, and folds a flagged material update into the archive entry — this wiring is the actual point of Task 7's materiality assessment; a version of this task that builds `assess_materiality` but never calls it does not satisfy the plan.
+- Produces: `run_daily.process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dict]` — returns a list of `{"one_liner": str, "content": str}` per group logged. `one_liner` is for the archive run-summary; `content` is the full synthesized summary_md, passed to `assess_materiality` (a one-liner like "Krown digest: 3 videos -> url" is too thin to judge materiality against).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1063,6 +1136,8 @@ def test_process_channel_logs_real_content_and_marks_ledger():
         summaries = run_daily.process_channel(channel, led)
 
     assert len(summaries) == 1
+    assert summaries[0]["content"] == "## AI Summary\ntest"
+    assert "https://notion.so/newpage" in summaries[0]["one_liner"]
     assert led.is_processed("v1")
     assert mock_create.called
 
@@ -1079,6 +1154,41 @@ def test_process_channel_skips_promo_only_videos():
 
     assert not mock_create.called
     assert led.is_processed("v1")  # still marked so we don't re-check it every day
+
+def test_main_assesses_materiality_against_full_thesis_and_flags_archive():
+    fake_channel = MagicMock()
+    with patch("run_daily.config.CHANNELS", [fake_channel]), \
+         patch("run_daily.ledger.Ledger.load"), \
+         patch("run_daily.ledger.Ledger.save"), \
+         patch("run_daily.process_channel", return_value=[
+             {"one_liner": "Krown digest (2026-08-05): 1 video(s) -> https://notion.so/x", "content": "Fed hiked rates unexpectedly"}
+         ]), \
+         patch("run_daily.thesis_updater.fetch_page_plain_text", return_value="FULL THESIS TEXT") as mock_fetch, \
+         patch("run_daily.thesis_updater.assess_materiality", return_value="- New Fed hike signal confirmed") as mock_assess, \
+         patch("run_daily.thesis_updater.append_archive_entry") as mock_archive:
+        run_daily.main()
+
+    mock_fetch.assert_called_once_with(config.THESIS_PAGE_ID)
+    mock_assess.assert_called_once_with(["Fed hiked rates unexpectedly"], "FULL THESIS TEXT")
+    assert mock_archive.called
+    archived_summary = mock_archive.call_args[0][1]
+    assert "Krown digest" in archived_summary
+    assert "MATERIAL UPDATE FLAGGED" in archived_summary
+    assert "New Fed hike signal confirmed" in archived_summary
+
+def test_main_skips_materiality_check_when_nothing_logged():
+    with patch("run_daily.config.CHANNELS", [MagicMock()]), \
+         patch("run_daily.ledger.Ledger.load"), \
+         patch("run_daily.ledger.Ledger.save"), \
+         patch("run_daily.process_channel", return_value=[]), \
+         patch("run_daily.thesis_updater.fetch_page_plain_text") as mock_fetch, \
+         patch("run_daily.thesis_updater.assess_materiality") as mock_assess, \
+         patch("run_daily.thesis_updater.append_archive_entry") as mock_archive:
+        run_daily.main()
+
+    assert not mock_fetch.called
+    assert not mock_assess.called
+    assert mock_archive.called
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1108,7 +1218,7 @@ import thesis_updater
 LEDGER_PATH = Path(__file__).parent / "processed.json"
 
 
-def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[str]:
+def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dict]:
     entries = rss.fetch_recent_videos(channel)
     groups = ledger.group_new_videos(entries, led)
     summaries = []
@@ -1137,34 +1247,49 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[str
                     v["title"], channel_name, date, summary_md, v["video_id"], v["transcript"]
                 )
                 led.mark_processed(v["video_id"], url)
-                summaries.append(f"{channel_name}: {v['title']} -> {url}")
+                summaries.append({"one_liner": f"{channel_name}: {v['title']} -> {url}", "content": summary_md})
         else:
             summary_md = synthesize.write_digest_summary(channel_name, date, real_content_videos)
             url = notion_writer.create_digest_page(channel_name, date, summary_md, real_content_videos)
             for v in real_content_videos:
                 led.mark_processed(v["video_id"], url)
-            summaries.append(f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}")
+            summaries.append({
+                "one_liner": f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}",
+                "content": summary_md,
+            })
 
     return summaries
 
 
 def main() -> None:
     led = ledger.Ledger.load(LEDGER_PATH)
-    all_summaries: list[str] = []
+    all_entries: list[dict] = []
 
     for channel in config.CHANNELS:
         try:
-            all_summaries.extend(process_channel(channel, led))
+            all_entries.extend(process_channel(channel, led))
         except Exception as exc:
-            all_summaries.append(f"{channel.name}: RUN FAILED - {exc}")
+            all_entries.append({"one_liner": f"{channel.name}: RUN FAILED - {exc}", "content": ""})
 
     led.save(LEDGER_PATH)
 
     today = datetime.date.today()
-    if all_summaries:
-        run_summary = "\n".join(all_summaries)
-    else:
-        run_summary = "No new content across any of the 4 channels today."
+    if not all_entries:
+        thesis_updater.append_archive_entry(today, "No new content across any of the 4 channels today.")
+        return
+
+    run_summary = "\n".join(e["one_liner"] for e in all_entries)
+
+    content_summaries = [e["content"] for e in all_entries if e["content"]]
+    if content_summaries:
+        current_thesis = thesis_updater.fetch_page_plain_text(config.THESIS_PAGE_ID)
+        material_update = thesis_updater.assess_materiality(content_summaries, current_thesis)
+        if material_update:
+            run_summary += (
+                "\n\n**MATERIAL UPDATE FLAGGED — needs a manual Snapshot/Operating Thesis rewrite:**\n"
+                + material_update
+            )
+
     thesis_updater.append_archive_entry(today, run_summary)
 
 
@@ -1175,7 +1300,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd scouts/youtube-intake && python -m pytest tests/test_run_daily.py -v`
-Expected: PASS (3 tests)
+Expected: PASS (5 tests)
 
 - [ ] **Step 5: Run the full test suite**
 
@@ -1275,6 +1400,6 @@ git commit -m "scout: add Railway deployment config and update README"
 - Error handling (transcript failure, RSS failure, Notion failure) → Task 4 (`source="failed"`), Task 8 (`main()`'s per-channel try/except; failed transcripts marked processed with empty URL so they aren't retried forever but are visible in the ledger as a blank entry).
 - Materiality judgment for thesis updates being an LLM call, not deterministic rules (spec's ambiguity-fix note) → Task 7 (`assess_materiality`).
 
-**Known gap, flagged not hidden:** this plan builds `assess_materiality` and the archive-append flow (Task 7), but does not include a task that actually rewrites the Snapshot/Bottom-line/Operating-Thesis sections in place the way the 2026-08-03 manual run did (targeted `update_content` search-and-replace against known section headers). That's a meaningfully harder problem — the manual run had a human (me) reading the whole page and making judgment calls about what to demote vs. correct vs. leave alone. Recommend treating "auto-write full snapshot replacement" as a Phase 2 for this scout, and shipping Phase 1 as: log new content, assess materiality, append a clear archive-log summary of *what changed* — and let Elena (or a future Gina session) do the actual snapshot rewrite using that summary, same as the manual pattern that already worked well on 2026-08-03. This is a scope call worth confirming with Elena before Task 7 is executed, not a silent limitation.
+**Scope confirmed with Elena (4 Aug 2026): log + flag, not full auto-rewrite.** This plan builds `assess_materiality` and the archive-append flow (Task 7), wired into `run_daily.main()` (Task 8) so it actually runs on every day with real content — it does NOT rewrite the Snapshot/Bottom-line/Operating-Thesis sections in place the way the 2026-08-03 manual run did (targeted `update_content` search-and-replace against known section headers). That's a meaningfully harder problem — the manual run had a human (me) reading the whole page and making judgment calls about what to demote vs. correct vs. leave alone. Phase 1 (this plan): log new content, assess materiality against the FULL current thesis page (not just the Snapshot excerpt — fixed 4 Aug 2026, see Task 7), append a clear, visibly-flagged archive-log summary of *what changed and why it might matter*. Elena (or a future Gina session) does the actual snapshot rewrite using that flag, same as the manual pattern that already worked on 2026-08-03. Full auto-rewrite is a Phase 2 candidate, not in scope here.
 
 **Type consistency check:** `VideoEntry`, `TranscriptResult`, `VideoClassification`, `Ledger`, `Channel` — all used consistently by name and field across Tasks 2-8. `notion_writer.create_digest_page` and `create_episode_page` signatures match what Task 8's `process_channel` calls. Confirmed no drift.
