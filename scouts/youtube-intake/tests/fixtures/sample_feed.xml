@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <yt:videoId>abc12345678</yt:videoId>
+    <title>Test Video One</title>
+    <published>2026-08-01T12:00:00+00:00</published>
+  </entry>
+  <entry>
+    <yt:videoId>def87654321</yt:videoId>
+    <title>Test Video Two</title>
+    <published>2026-08-02T09:30:00+00:00</published>
+  </entry>
+</feed>
