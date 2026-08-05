@@ -22,8 +22,8 @@ The thesis is never reset. Every new input is checked against what's already the
 
 | Component | Status |
 |---|---|
-| [YouTube intake](scouts/youtube-intake/) | Designed, implementation next |
-| [Telegram bot (intake + Q&A)](telegram-bot/) | Designed, implementation next |
+| [YouTube intake](scouts/youtube-intake/) | **Live** — deployed to Railway, daily cron 10:00 UTC, 4 channels including MacroVoices |
+| [Telegram bot (intake + Q&A)](telegram-bot/) | Designed, on hold until the YouTube scout is proven out |
 | [CFTC Commitment of Traders scout](scouts/cftc-cot/) | Planned |
 | [FRED macro data scout](scouts/fred-macro-data/) | Planned |
 | [Insider + institutional flow scout](scouts/sec-edgar-flow/) | Planned |
@@ -36,4 +36,4 @@ Python, Claude (synthesis + Q&A), Notion (thesis storage), Telegram Bot API, Rai
 
 ## Status
 
-Early stage. YouTube intake + Telegram bot have a full design spec, see [`docs/superpowers/specs/`](docs/superpowers/specs/). Implementation not yet started.
+YouTube intake is built and live (05 Aug 2026), checking new sources against the full rolling thesis on every run. Telegram bot has a full design spec, see [`docs/superpowers/specs/`](docs/superpowers/specs/), but is on hold. CFTC CoT scout is next in build order.
