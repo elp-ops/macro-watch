@@ -1,0 +1,4 @@
+.env
+processed.json
+__pycache__/
+*.pyc
