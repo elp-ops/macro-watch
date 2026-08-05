@@ -13,17 +13,18 @@ from synthesize import VideoClassification
 
 def test_process_channel_skips_when_no_new_videos():
     channel = config.CHANNELS[1]  # Krown
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     with patch("run_daily.rss.fetch_recent_videos", return_value=[]):
         summaries = run_daily.process_channel(channel, led)
     assert summaries == []
 
 def test_process_channel_logs_real_content_and_marks_ledger():
     channel = config.CHANNELS[1]  # Krown, digest format
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
          patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
          patch("run_daily.synthesize.write_digest_summary", return_value="## AI Summary\ntest"), \
@@ -38,10 +39,11 @@ def test_process_channel_logs_real_content_and_marks_ledger():
 
 def test_process_channel_skips_promo_only_videos():
     channel = config.CHANNELS[1]
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Buy My Course", datetime.date(2026, 8, 5), "Krown")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
          patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "promo transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", False, "pure promo")), \
          patch("run_daily.notion_writer.create_digest_page") as mock_create:
@@ -52,10 +54,11 @@ def test_process_channel_skips_promo_only_videos():
 
 def test_process_channel_digest_write_failure_does_not_mark_ledger_and_logs_failed_entry():
     channel = config.CHANNELS[1]  # Krown, digest format
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
          patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
          patch("run_daily.synthesize.write_digest_summary", return_value="## AI Summary\ntest"), \
@@ -71,10 +74,11 @@ def test_process_channel_digest_write_failure_does_not_mark_ledger_and_logs_fail
 
 def test_process_channel_episode_write_failure_does_not_mark_ledger_and_logs_failed_entry():
     channel = config.CHANNELS[0]  # MacroVoices, episode format
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Real Signal Episode", datetime.date(2026, 8, 5), "MacroVoices")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
          patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
          patch("run_daily.synthesize.write_episode_summary", return_value="## AI Summary\ntest"), \
@@ -89,7 +93,7 @@ def test_process_channel_episode_write_failure_does_not_mark_ledger_and_logs_fai
 
 def test_process_channel_classification_failure_does_not_lose_other_groups():
     channel = config.CHANNELS[1]  # Krown, digest format
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     entry_day1 = VideoEntry("v1", "Video Day 1", datetime.date(2026, 8, 4), "Krown")
     entry_day2 = VideoEntry("v2", "Video Day 2", datetime.date(2026, 8, 5), "Krown")
 
@@ -98,7 +102,8 @@ def test_process_channel_classification_failure_does_not_lose_other_groups():
             raise RuntimeError("Anthropic API error")
         return VideoClassification("v2", True, "has price levels")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[entry_day1, entry_day2]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[entry_day1, entry_day2]), \
          patch("run_daily.transcript.get_transcript", side_effect=lambda vid: TranscriptResult(vid, "real transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", side_effect=fake_classify), \
          patch("run_daily.synthesize.write_digest_summary", return_value="## AI Summary\nday2"), \
@@ -112,7 +117,7 @@ def test_process_channel_classification_failure_does_not_lose_other_groups():
 
 def test_process_channel_passes_filtered_out_videos_to_digest_summary():
     channel = config.CHANNELS[1]  # Krown, digest format
-    led = ledger.Ledger.load(Path("/nonexistent/processed.json"))
+    led = ledger.Ledger({})
     real_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
     promo_entry = VideoEntry("v2", "Buy My Course", datetime.date(2026, 8, 5), "Krown")
 
@@ -121,7 +126,8 @@ def test_process_channel_passes_filtered_out_videos_to_digest_summary():
             return VideoClassification("v2", False, "pure course promo")
         return VideoClassification("v1", True, "has price levels")
 
-    with patch("run_daily.rss.fetch_recent_videos", return_value=[real_entry, promo_entry]), \
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[real_entry, promo_entry]), \
          patch("run_daily.transcript.get_transcript", side_effect=lambda vid: TranscriptResult(vid, "transcript", "captions")), \
          patch("run_daily.synthesize.classify_video", side_effect=fake_classify), \
          patch("run_daily.synthesize.write_digest_summary", return_value="## AI Summary\ntest") as mock_write, \
@@ -136,7 +142,6 @@ def test_main_assesses_materiality_against_full_thesis_and_flags_archive():
     fake_channel = MagicMock()
     with patch("run_daily.config.CHANNELS", [fake_channel]), \
          patch("run_daily.ledger.Ledger.load"), \
-         patch("run_daily.ledger.Ledger.save"), \
          patch("run_daily.process_channel", return_value=[
              {"one_liner": "Krown digest (2026-08-05): 1 video(s) -> https://notion.so/x", "content": "Fed hiked rates unexpectedly"}
          ]), \
@@ -157,7 +162,6 @@ def test_main_still_archives_when_materiality_check_fails():
     fake_channel = MagicMock()
     with patch("run_daily.config.CHANNELS", [fake_channel]), \
          patch("run_daily.ledger.Ledger.load"), \
-         patch("run_daily.ledger.Ledger.save"), \
          patch("run_daily.process_channel", return_value=[
              {"one_liner": "Krown digest (2026-08-05): 1 video(s) -> https://notion.so/x", "content": "some content"}
          ]), \
@@ -172,7 +176,6 @@ def test_main_still_archives_when_materiality_check_fails():
 def test_main_skips_materiality_check_when_nothing_logged():
     with patch("run_daily.config.CHANNELS", [MagicMock()]), \
          patch("run_daily.ledger.Ledger.load"), \
-         patch("run_daily.ledger.Ledger.save"), \
          patch("run_daily.process_channel", return_value=[]), \
          patch("run_daily.thesis_updater.fetch_page_plain_text") as mock_fetch, \
          patch("run_daily.thesis_updater.assess_materiality") as mock_assess, \

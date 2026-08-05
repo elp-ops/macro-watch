@@ -16,8 +16,6 @@ import synthesize
 import notion_writer
 import thesis_updater
 
-LEDGER_PATH = Path(__file__).parent / "processed.json"
-
 
 def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dict]:
     entries = rss.fetch_recent_videos(channel)
@@ -31,7 +29,7 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
             for video in videos:
                 result = transcript.get_transcript(video.video_id)
                 if result.text is None:
-                    led.mark_processed(video.video_id, "")  # flagged/skipped, don't retry forever
+                    led.mark_processed(video.video_id, "", channel=channel_name, date=date)  # flagged/skipped, don't retry forever
                     continue
                 classification = synthesize.classify_video(video.title, result.text)
                 if classification.has_real_content:
@@ -40,7 +38,7 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
                     })
                 else:
                     filtered_out.append({"title": video.title, "reason": classification.reason})
-                    led.mark_processed(video.video_id, "")
+                    led.mark_processed(video.video_id, "", channel=channel_name, date=date)
 
             if not real_content_videos:
                 continue
@@ -51,13 +49,13 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
                     url = notion_writer.create_episode_page(
                         v["title"], channel_name, date, summary_md, v["video_id"], v["transcript"]
                     )
-                    led.mark_processed(v["video_id"], url)
+                    led.mark_processed(v["video_id"], url, channel=channel_name, date=date)
                     summaries.append({"one_liner": f"{channel_name}: {v['title']} -> {url}", "content": summary_md})
             else:
                 summary_md = synthesize.write_digest_summary(channel_name, date, real_content_videos, filtered_out)
                 url = notion_writer.create_digest_page(channel_name, date, summary_md, real_content_videos)
                 for v in real_content_videos:
-                    led.mark_processed(v["video_id"], url)
+                    led.mark_processed(v["video_id"], url, channel=channel_name, date=date)
                 summaries.append({
                     "one_liner": f"{channel_name} digest ({date}): {len(real_content_videos)} video(s) -> {url}",
                     "content": summary_md,
@@ -75,7 +73,7 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
 
 
 def main() -> None:
-    led = ledger.Ledger.load(LEDGER_PATH)
+    led = ledger.Ledger.load()
     all_entries: list[dict] = []
 
     for channel in config.CHANNELS:
@@ -83,8 +81,6 @@ def main() -> None:
             all_entries.extend(process_channel(channel, led))
         except Exception as exc:
             all_entries.append({"one_liner": f"{channel.name}: RUN FAILED - {exc}", "content": ""})
-
-    led.save(LEDGER_PATH)
 
     today = datetime.date.today()
     if not all_entries:
