@@ -10,6 +10,15 @@ VideoClassification = namedtuple("VideoClassification", ["video_id", "has_real_c
 
 _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+
+def extract_text(response) -> str:
+    """Anthropic responses can lead with a thinking block before the text block
+    (e.g. extended thinking). content[0] is not reliably the text block, so scan for it."""
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError("No text block found in Anthropic response")
+
 CLASSIFY_PROMPT = """You are screening a YouTube video transcript for inclusion in a macro/crypto investment thesis tracker.
 
 Title: {title}
@@ -79,7 +88,7 @@ def classify_video(title: str, transcript_text: str) -> VideoClassification:
         max_tokens=200,
         messages=[{"role": "user", "content": prompt}],
     )
-    text = response.content[0].text
+    text = extract_text(response)
     real_content = re.search(r"REAL_CONTENT:\s*(true|false)", text, re.IGNORECASE)
     reason = re.search(r"REASON:\s*(.+)", text)
     return VideoClassification(
@@ -106,7 +115,7 @@ def write_digest_summary(channel_name: str, date, videos: list[dict], filtered_o
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return extract_text(response)
 
 
 def write_episode_summary(title: str, speaker: str, transcript_text: str) -> str:
@@ -116,4 +125,4 @@ def write_episode_summary(title: str, speaker: str, transcript_text: str) -> str
         max_tokens=4000,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return extract_text(response)

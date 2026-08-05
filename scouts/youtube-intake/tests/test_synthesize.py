@@ -5,11 +5,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import synthesize
 
-def _fake_anthropic_response(text: str):
-    fake_block = MagicMock()
-    fake_block.text = text
+def _fake_anthropic_response(text: str, lead_with_thinking_block: bool = False):
+    fake_text_block = MagicMock()
+    fake_text_block.type = "text"
+    fake_text_block.text = text
+    content = [fake_text_block]
+    if lead_with_thinking_block:
+        fake_thinking_block = MagicMock(spec=["type", "thinking"])  # no .text attribute, like the real SDK type
+        fake_thinking_block.type = "thinking"
+        content = [fake_thinking_block, fake_text_block]
     fake_response = MagicMock()
-    fake_response.content = [fake_block]
+    fake_response.content = content
     return fake_response
 
 def test_classify_video_parses_real_content_true():
@@ -37,3 +43,22 @@ def test_write_digest_summary_includes_channel_and_date():
             "Krown", datetime.date(2026, 8, 5), [{"title": "Test Video", "transcript": "some transcript"}]
         )
     assert "AI Summary" in result
+
+def test_extract_text_skips_leading_thinking_block():
+    # Regression test: a live run hit 'ThinkingBlock' object has no attribute 'text' because
+    # content[0] isn't reliably the text block when the model returns a thinking block first.
+    with patch("synthesize._client") as mock_client:
+        mock_client.messages.create.return_value = _fake_anthropic_response(
+            'REAL_CONTENT: true\nREASON: has price levels', lead_with_thinking_block=True
+        )
+        result = synthesize.classify_video("Some Title", "transcript")
+    assert result.has_real_content is True
+
+def test_extract_text_raises_if_no_text_block_present():
+    fake_thinking_block = MagicMock(spec=["type", "thinking"])
+    fake_thinking_block.type = "thinking"
+    fake_response = MagicMock()
+    fake_response.content = [fake_thinking_block]
+    import pytest
+    with pytest.raises(ValueError):
+        synthesize.extract_text(fake_response)

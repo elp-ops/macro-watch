@@ -11,6 +11,7 @@ from notion_client import Client
 
 import config
 from notion_writer import guard_against_original_thesis
+from synthesize import extract_text
 
 _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 _notion_client = Client(auth=os.getenv("NOTION_API_KEY"))
@@ -81,7 +82,7 @@ def assess_materiality(new_content_summaries: list[str], current_thesis: str) ->
     response = _client.messages.create(
         model=MODEL, max_tokens=1500, messages=[{"role": "user", "content": prompt}]
     )
-    text = response.content[0].text
+    text = extract_text(response)
     if re.search(r"MATERIAL:\s*true", text, re.IGNORECASE):
         update_match = re.search(r"UPDATE:\s*(.+)", text, re.DOTALL)
         if update_match:

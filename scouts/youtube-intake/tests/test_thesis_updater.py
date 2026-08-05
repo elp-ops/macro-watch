@@ -7,11 +7,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import thesis_updater
 
-def _fake_anthropic_response(text: str):
-    fake_block = MagicMock()
-    fake_block.text = text
+def _fake_anthropic_response(text: str, lead_with_thinking_block: bool = False):
+    fake_text_block = MagicMock()
+    fake_text_block.type = "text"
+    fake_text_block.text = text
+    content = [fake_text_block]
+    if lead_with_thinking_block:
+        fake_thinking_block = MagicMock(spec=["type", "thinking"])  # no .text attribute, like the real SDK type
+        fake_thinking_block.type = "thinking"
+        content = [fake_thinking_block, fake_text_block]
     fake_response = MagicMock()
-    fake_response.content = [fake_block]
+    fake_response.content = content
     return fake_response
 
 def test_assess_materiality_returns_none_when_not_material():
@@ -33,6 +39,17 @@ def test_append_archive_entry_calls_notion():
     with patch("thesis_updater._notion_client") as mock_client:
         thesis_updater.append_archive_entry(datetime.date(2026, 8, 5), "Test run summary, nothing material.")
     assert mock_client.blocks.children.append.called
+
+def test_assess_materiality_skips_leading_thinking_block():
+    # Regression test: a live run hit 'ThinkingBlock' object has no attribute 'text' because
+    # content[0] isn't reliably the text block when the model returns a thinking block first.
+    with patch("thesis_updater._client") as mock_client:
+        mock_client.messages.create.return_value = _fake_anthropic_response(
+            "MATERIAL: true\nUPDATE:\n- New Fed hike signal confirmed", lead_with_thinking_block=True
+        )
+        result = thesis_updater.assess_materiality(["Fed hiked rates unexpectedly"], "full thesis text")
+    assert result is not None
+    assert "Fed hike" in result
 
 def test_append_archive_entry_chunks_long_summary_into_multiple_blocks():
     long_summary = "x" * 5000  # exceeds the 1900-char safe margin under Notion's 2000-char rich_text cap
