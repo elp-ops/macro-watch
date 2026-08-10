@@ -11,15 +11,36 @@ from rss import VideoEntry
 from transcript import TranscriptResult
 from synthesize import VideoClassification
 
+def test_process_channel_skips_trading_desk_companion_clips():
+    # Elena's request, 10 Aug 2026: only the main numbered weekly interview counts for
+    # MacroVoices, not companion segments like "Trading Desk - August 6th 2026".
+    channel = config.CHANNELS[0]  # MacroVoices, episode format
+    led = ledger.Ledger({})
+    main_entry = VideoEntry("v1", "MacroVoices #544 Viktor Shvets: How Markets Survive Disruption", datetime.date(2026, 8, 6), "MacroVoices")
+    companion_entry = VideoEntry("v2", "Trading Desk - August 6th 2026", datetime.date(2026, 8, 6), "MacroVoices")
+
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[main_entry, companion_entry]), \
+         patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", "real transcript", "captions")), \
+         patch("run_daily.synthesize.classify_video", return_value=VideoClassification("v1", True, "has price levels")), \
+         patch("run_daily.synthesize.write_episode_summary", return_value="## AI Summary\ntest"), \
+         patch("run_daily.notion_writer.create_episode_page", return_value="https://notion.so/newpage") as mock_create:
+        summaries = run_daily.process_channel(channel, led)
+
+    assert len(summaries) == 1
+    assert mock_create.call_count == 1
+    assert led.is_processed("v1")
+    assert led.is_processed("v2")  # marked so it's not re-checked every day, but never sent for synthesis
+
 def test_process_channel_skips_when_no_new_videos():
-    channel = config.DEFERRED_CHANNELS[0]  # Krown
+    channel = config.CHANNELS[1]  # Krown
     led = ledger.Ledger({})
     with patch("run_daily.rss.fetch_recent_videos", return_value=[]):
         summaries = run_daily.process_channel(channel, led)
     assert summaries == []
 
 def test_process_channel_logs_real_content_and_marks_ledger():
-    channel = config.DEFERRED_CHANNELS[0]  # Krown, digest format
+    channel = config.CHANNELS[1]  # Krown, digest format
     led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
 
@@ -38,7 +59,7 @@ def test_process_channel_logs_real_content_and_marks_ledger():
     assert mock_create.called
 
 def test_process_channel_skips_promo_only_videos():
-    channel = config.DEFERRED_CHANNELS[0]
+    channel = config.CHANNELS[1]
     led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Buy My Course", datetime.date(2026, 8, 5), "Krown")
 
@@ -53,7 +74,7 @@ def test_process_channel_skips_promo_only_videos():
     assert led.is_processed("v1")  # still marked so we don't re-check it every day
 
 def test_process_channel_digest_write_failure_does_not_mark_ledger_and_logs_failed_entry():
-    channel = config.DEFERRED_CHANNELS[0]  # Krown, digest format
+    channel = config.CHANNELS[1]  # Krown, digest format
     led = ledger.Ledger({})
     fake_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
 
@@ -75,7 +96,7 @@ def test_process_channel_digest_write_failure_does_not_mark_ledger_and_logs_fail
 def test_process_channel_episode_write_failure_does_not_mark_ledger_and_logs_failed_entry():
     channel = config.CHANNELS[0]  # MacroVoices, episode format
     led = ledger.Ledger({})
-    fake_entry = VideoEntry("v1", "Real Signal Episode", datetime.date(2026, 8, 5), "MacroVoices")
+    fake_entry = VideoEntry("v1", "MacroVoices #545 Real Signal Episode", datetime.date(2026, 8, 5), "MacroVoices")
 
     with patch("run_daily.ledger._client"), \
          patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
@@ -92,7 +113,7 @@ def test_process_channel_episode_write_failure_does_not_mark_ledger_and_logs_fai
     assert "rate limited" in summaries[0]["one_liner"]
 
 def test_process_channel_classification_failure_does_not_lose_other_groups():
-    channel = config.DEFERRED_CHANNELS[0]  # Krown, digest format
+    channel = config.CHANNELS[1]  # Krown, digest format
     led = ledger.Ledger({})
     entry_day1 = VideoEntry("v1", "Video Day 1", datetime.date(2026, 8, 4), "Krown")
     entry_day2 = VideoEntry("v2", "Video Day 2", datetime.date(2026, 8, 5), "Krown")
@@ -116,7 +137,7 @@ def test_process_channel_classification_failure_does_not_lose_other_groups():
     assert led.is_processed("v2")  # day 2 succeeded despite day 1's failure
 
 def test_process_channel_passes_filtered_out_videos_to_digest_summary():
-    channel = config.DEFERRED_CHANNELS[0]  # Krown, digest format
+    channel = config.CHANNELS[1]  # Krown, digest format
     led = ledger.Ledger({})
     real_entry = VideoEntry("v1", "Real Signal Video", datetime.date(2026, 8, 5), "Krown")
     promo_entry = VideoEntry("v2", "Buy My Course", datetime.date(2026, 8, 5), "Krown")

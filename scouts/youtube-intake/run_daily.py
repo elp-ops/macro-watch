@@ -1,5 +1,6 @@
 import datetime
 import logging
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -16,9 +17,25 @@ import synthesize
 import notion_writer
 import thesis_updater
 
+# MacroVoices posts companion clips (e.g. "Trading Desk - August 6th 2026") alongside the main
+# numbered weekly interview. Elena only wants the main episode -- 10 Aug 2026.
+MAIN_EPISODE_TITLE_RE = re.compile(r"^macrovoices\s*#\d+", re.IGNORECASE)
+
+
+def _is_main_episode(channel: "config.Channel", title: str) -> bool:
+    if channel.format != "episode":
+        return True
+    return bool(MAIN_EPISODE_TITLE_RE.match(title.strip()))
+
 
 def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dict]:
     entries = rss.fetch_recent_videos(channel)
+
+    non_main = [e for e in entries if not _is_main_episode(channel, e.title)]
+    for entry in non_main:
+        led.mark_processed(entry.video_id, "", channel=entry.channel_name, date=entry.published)
+    entries = [e for e in entries if _is_main_episode(channel, e.title)]
+
     groups = ledger.group_new_videos(entries, led)
     summaries = []
 
