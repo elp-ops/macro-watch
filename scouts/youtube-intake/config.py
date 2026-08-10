@@ -5,7 +5,7 @@ Channel = namedtuple("Channel", ["name", "handle", "channel_id", "format"])
 CHANNELS = [
     Channel("MacroVoices", "@macrovoices7508", "UCICRehoZjq3ZtAWgRJX118A", "episode"),
     Channel("Krown", "@ECKrown", "UCnwxzpFzZNtLH8NgTeAROFA", "digest"),
-    Channel("IntelligentCryptocurrency", "@intelligentcryptocurrency", "UCRF2-5W_uwflhpj6Hf6r4Jw", "digest"),
+    Channel("Dirk", "@intelligentcryptocurrency", "UCRF2-5W_uwflhpj6Hf6r4Jw", "digest"),  # channel is "IntelligentCryptocurrency", run by Dirk (Crypto Diggy) - Elena wants him referred to by name, not channel name (10 Aug 2026)
     Channel("IvanOnTech", "@IvanOnTech", "UCrYmtJBtLdtm2ov84ulV-yg", "digest"),
 ]
 
