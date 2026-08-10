@@ -44,6 +44,14 @@ def test_write_digest_summary_includes_channel_and_date():
         )
     assert "AI Summary" in result
 
+def test_write_episode_summary_uses_a_large_enough_token_budget():
+    # Regression test for the 10 Aug 2026 bug: max_tokens=4000 was silently truncating dense
+    # episode summaries mid-section (missing Bond/Fed, Bottom line, Soundbites, Open questions).
+    with patch("synthesize._client") as mock_client:
+        mock_client.messages.create.return_value = _fake_anthropic_response("## Bottom line\nfull summary")
+        synthesize.write_episode_summary("Test Episode", "Speaker", "transcript text")
+    assert mock_client.messages.create.call_args.kwargs["max_tokens"] >= 8000
+
 def test_extract_text_skips_leading_thinking_block():
     # Regression test: a live run hit 'ThinkingBlock' object has no attribute 'text' because
     # content[0] isn't reliably the text block when the model returns a thinking block first.

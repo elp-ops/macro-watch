@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import datetime
 
@@ -44,6 +46,7 @@ def _markdown_to_paragraph_blocks(markdown: str) -> list[dict]:
 
 
 NOTION_MAX_CHILDREN_PER_CALL = 100
+RICH_TEXT_MAX_CHARS = 1900  # safe margin under Notion's 2000-char rich_text content cap
 
 
 def _create_page_with_chunked_children(parent: dict, icon: dict, properties: dict, children: list[dict]) -> dict:
@@ -57,13 +60,37 @@ def _create_page_with_chunked_children(parent: dict, icon: dict, properties: dic
     return page
 
 
+def _chunk_text_blocks(text: str) -> list[dict]:
+    """Splits arbitrary-length text into paragraph blocks, each under Notion's per-block rich_text
+    cap. Fixed 10 Aug 2026: this used to be a single transcript_text[:1900] slice that silently
+    dropped everything past the first ~1900 characters of every transcript ever saved."""
+    return [
+        {"object": "block", "type": "paragraph", "paragraph": {"rich_text": _rich_text(text[i:i + RICH_TEXT_MAX_CHARS])}}
+        for i in range(0, len(text), RICH_TEXT_MAX_CHARS)
+    ]
+
+
+def _find_existing_page_url(title: str) -> str | None:
+    """Guards against duplicate source pages. Fixed 10 Aug 2026: a run that half-failed after
+    creating a page but before ledger.mark_processed() left the video unmarked, so the next run
+    reprocessed it from scratch and created a second page with the same title (MV544 Viktor
+    Shvets incident)."""
+    resp = _client.data_sources.query(
+        data_source_id=config.NOTION_SOURCES_DATA_SOURCE_ID,
+        filter={"property": "Name", "title": {"equals": title}},
+    )
+    results = resp.get("results", [])
+    return results[0]["url"] if results else None
+
+
 def _create_transcript_subpage(parent_page_id: str, title: str, transcript_text: str) -> str:
     guard_against_original_thesis(parent_page_id)
+    children = _chunk_text_blocks(transcript_text) if transcript_text else _markdown_to_paragraph_blocks("(empty transcript)")
     page = _create_page_with_chunked_children(
         parent={"page_id": parent_page_id},
         icon={"type": "emoji", "emoji": "\U0001F4DD"},
         properties={"title": {"title": _rich_text(title)}},
-        children=_markdown_to_paragraph_blocks(transcript_text[:1900] or "(empty transcript)"),
+        children=children,
     )
     return page["url"]
 
@@ -71,6 +98,9 @@ def _create_transcript_subpage(parent_page_id: str, title: str, transcript_text:
 def create_digest_page(channel_name: str, date: datetime.date, summary_markdown: str, videos: list[dict]) -> str:
     date_str = date.strftime("%d %b %Y")
     title = f"{channel_name}: Daily Digest ({date_str})"
+    existing_url = _find_existing_page_url(title)
+    if existing_url:
+        return existing_url
     page = _create_page_with_chunked_children(
         parent={"data_source_id": config.NOTION_SOURCES_DATA_SOURCE_ID},
         icon={"type": "emoji", "emoji": "\U0001F3A5"},
@@ -88,6 +118,9 @@ def create_digest_page(channel_name: str, date: datetime.date, summary_markdown:
 
 
 def create_episode_page(title: str, speaker: str, date: datetime.date, summary_markdown: str, video_id: str, transcript_text: str) -> str:
+    existing_url = _find_existing_page_url(title)
+    if existing_url:
+        return existing_url
     page = _create_page_with_chunked_children(
         parent={"data_source_id": config.NOTION_SOURCES_DATA_SOURCE_ID},
         icon={"type": "emoji", "emoji": "\U0001F30E"},

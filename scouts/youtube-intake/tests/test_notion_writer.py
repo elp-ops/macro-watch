@@ -17,6 +17,7 @@ def test_guard_against_original_thesis_allows_gina_copy():
 
 def test_create_digest_page_returns_url():
     with patch("notion_writer._client") as mock_client:
+        mock_client.data_sources.query.return_value = {"results": []}
         mock_client.pages.create.return_value = {"id": "abc-123", "url": "https://notion.so/abc123"}
         url = notion_writer.create_digest_page(
             "Krown", datetime.date(2026, 8, 5), "## AI Summary\ntest",
@@ -28,6 +29,7 @@ def test_create_digest_page_returns_url():
 def test_create_episode_page_chunks_more_than_100_blocks():
     long_summary = "\n".join(f"Line {i}" for i in range(150))  # 150 non-empty lines -> 150 blocks
     with patch("notion_writer._client") as mock_client:
+        mock_client.data_sources.query.return_value = {"results": []}
         mock_client.pages.create.return_value = {"id": "page-1", "url": "https://notion.so/page1"}
         notion_writer.create_episode_page(
             "Test Episode", "Some Speaker", datetime.date(2026, 8, 5), long_summary, "v1", "transcript text"
@@ -42,3 +44,38 @@ def test_create_episode_page_chunks_more_than_100_blocks():
     assert len(summary_append_batches) >= 1
     total_appended = sum(len(c.kwargs["children"]) for c in summary_append_batches)
     assert total_appended == 50
+
+def test_create_transcript_subpage_preserves_full_text_not_truncated():
+    # Regression test for the 10 Aug 2026 bug: this used to slice transcript_text[:1900] and drop
+    # everything past that, silently losing entire podcast transcripts.
+    long_transcript = "x" * 5000
+    with patch("notion_writer._client") as mock_client:
+        mock_client.pages.create.return_value = {"id": "sub-1", "url": "https://notion.so/sub1"}
+        notion_writer._create_transcript_subpage("parent-1", "TRANSCRIPT", long_transcript)
+
+    children = mock_client.pages.create.call_args.kwargs["children"]
+    reconstructed = "".join(b["paragraph"]["rich_text"][0]["text"]["content"] for b in children)
+    assert reconstructed == long_transcript
+    assert len(children) == 3  # 5000 chars split into <=1900-char blocks
+
+def test_create_episode_page_returns_existing_url_without_duplicating():
+    # Regression test for the 10 Aug 2026 bug: a half-failed run left a video unmarked in the
+    # ledger, so the next run reprocessed it and created a second Notion page (MV544 Viktor
+    # Shvets incident).
+    with patch("notion_writer._client") as mock_client:
+        mock_client.data_sources.query.return_value = {"results": [{"url": "https://notion.so/already-exists"}]}
+        url = notion_writer.create_episode_page(
+            "Test Episode", "Some Speaker", datetime.date(2026, 8, 5), "summary", "v1", "transcript text"
+        )
+    assert url == "https://notion.so/already-exists"
+    assert not mock_client.pages.create.called
+
+def test_create_digest_page_returns_existing_url_without_duplicating():
+    with patch("notion_writer._client") as mock_client:
+        mock_client.data_sources.query.return_value = {"results": [{"url": "https://notion.so/already-exists"}]}
+        url = notion_writer.create_digest_page(
+            "Krown", datetime.date(2026, 8, 5), "## AI Summary\ntest",
+            [{"title": "Video 1", "video_id": "v1", "transcript": "transcript text"}]
+        )
+    assert url == "https://notion.so/already-exists"
+    assert not mock_client.pages.create.called

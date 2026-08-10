@@ -119,10 +119,13 @@ def write_digest_summary(channel_name: str, date, videos: list[dict], filtered_o
 
 
 def write_episode_summary(title: str, speaker: str, transcript_text: str) -> str:
+    # max_tokens raised 4000 -> 8000 on 10 Aug 2026: 4000 was silently truncating dense episodes
+    # mid-generation, dropping entire required sections (Bond/Fed signals, Bottom line, Soundbites,
+    # Open questions) -- see MV544 Viktor Shvets incident.
     prompt = EPISODE_PROMPT.format(title=title, speaker=speaker, transcript=transcript_text[:100000])
     response = _client.messages.create(
         model=MODEL,
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
     return extract_text(response)
