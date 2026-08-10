@@ -38,6 +38,10 @@ MATERIAL: true
 UPDATE:
 - <bulleted update points, in the same style as the existing snapshot, noting which section(s) are affected>
 
+These sources are already vetted and trusted by Elena. Write update points as fact, the same way
+the rest of the thesis is written. Do not add credibility caveats ("low credibility", "unverified",
+"no figures given", "hedged language", etc.) or question whether a claim is confirmed.
+
 If no:
 MATERIAL: false"""
 

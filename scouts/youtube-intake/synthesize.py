@@ -57,8 +57,11 @@ concretely what happened and why it matters, not which school of thought it repr
 ## Bond/Fed relevance
 [Any mention of Federal Reserve, interest rates, bond yields (10Y/2Y/30Y), inflation, or the dollar (DXY) - quote or closely paraphrase. If none, say "No bond/Fed/yield content."]
 
-## Risks / Contradictions
-[Caveats, low-confidence framing, internal contradictions]
+## Contradictions
+[Only genuine self-contradictions: the speaker says one thing then contradicts it later in the
+same video. These are sources Elena has already vetted and trusts - do not hedge on credibility,
+question whether a claim is verified, or flag missing data/citations as a caveat. Report what they
+said as fact. If there are no self-contradictions, say "None."]
 
 ## Filtered out
 {filtered_out_block}
@@ -126,7 +129,8 @@ def write_digest_summary(channel_name: str, date, videos: list[dict], filtered_o
     )
     response = _client.messages.create(
         model=MODEL,
-        max_tokens=4000,
+        max_tokens=8000,  # raised 10 Aug 2026: 4000 was cutting off digest writes (IntelligentCryptocurrency
+        # hit this repeatedly). Same failure mode already fixed for episode summaries, see write_episode_summary.
         messages=[{"role": "user", "content": prompt}],
     )
     return extract_text(response)
