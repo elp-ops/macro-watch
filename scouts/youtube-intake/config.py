@@ -2,8 +2,14 @@ from collections import namedtuple
 
 Channel = namedtuple("Channel", ["name", "handle", "channel_id", "format"])
 
+# Active channels the scout pulls from. Scoped to MacroVoices only as of 10 Aug 2026
+# per Elena's call ("focus on MacroVoices for now, add other YouTubers later").
 CHANNELS = [
     Channel("MacroVoices", "@macrovoices7508", "UCICRehoZjq3ZtAWgRJX118A", "episode"),
+]
+
+# Defined but not active. Re-add to CHANNELS above to bring one back online.
+DEFERRED_CHANNELS = [
     Channel("Krown", "@ECKrown", "UCnwxzpFzZNtLH8NgTeAROFA", "digest"),
     Channel("IntelligentCryptocurrency", "@intelligentcryptocurrency", "UCRF2-5W_uwflhpj6Hf6r4Jw", "digest"),
     Channel("IvanOnTech", "@IvanOnTech", "UCrYmtJBtLdtm2ov84ulV-yg", "digest"),

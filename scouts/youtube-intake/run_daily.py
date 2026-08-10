@@ -84,7 +84,7 @@ def main() -> None:
 
     today = datetime.date.today()
     if not all_entries:
-        thesis_updater.append_archive_entry(today, "No new content across any of the 4 channels today.")
+        thesis_updater.append_archive_entry(today, f"No new content across any of the {len(config.CHANNELS)} channel(s) today.")
         return
 
     run_summary = "\n".join(e["one_liner"] for e in all_entries)

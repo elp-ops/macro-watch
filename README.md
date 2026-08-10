@@ -22,7 +22,7 @@ The thesis is never reset. Every new input is checked against what's already the
 
 | Component | Status |
 |---|---|
-| [YouTube intake](scouts/youtube-intake/) | **Live** — deployed to Railway, daily cron 10:00 UTC, 4 channels including MacroVoices |
+| [YouTube intake](scouts/youtube-intake/) | **Live** — deployed to Railway, daily cron 10:00 UTC, scoped to MacroVoices only (3 more channels defined, deferred) |
 | [Telegram bot (intake + Q&A)](telegram-bot/) | Designed, on hold until the YouTube scout is proven out |
 | [CFTC Commitment of Traders scout](scouts/cftc-cot/) | Planned |
 | [FRED macro data scout](scouts/fred-macro-data/) | Planned |
