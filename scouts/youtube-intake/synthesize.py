@@ -14,6 +14,13 @@ _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 def extract_text(response) -> str:
     """Anthropic responses can lead with a thinking block before the text block
     (e.g. extended thinking). content[0] is not reliably the text block, so scan for it."""
+    if response.stop_reason == "max_tokens":
+        # Fixed 10 Aug 2026: a raised max_tokens budget can still get hit on a verbose run
+        # (happened even at 8000). Previously this silently returned the partial text and it got
+        # written to Notion incomplete (see MV544 Viktor Shvets incident). Fail loudly instead so
+        # the existing per-video error handling in run_daily.py catches it, logs it, and retries
+        # next run rather than shipping broken content.
+        raise ValueError("Response was cut off by the max_tokens limit; summary is incomplete")
     for block in response.content:
         if block.type == "text":
             return block.text
@@ -39,7 +46,10 @@ Below are transcripts of {count} video(s) from this channel on this day, already
 Write a Notion page body in this exact structure (markdown):
 
 ## AI Summary
-[2-4 sentence overview of what this day's content covers]
+[2-4 SHORT sentences, written like you're explaining it to a smart friend with zero finance
+background, not a research analyst. No jargon left undefined ("K-shaped economy," "rolling
+bubble," etc. must be explained in plain words in the same sentence, not just named). Say
+concretely what happened and why it matters, not which school of thought it represents.]
 
 ## Key Claims
 - [bulleted concrete claims: price levels, indicators, timeframes, reasoning - one bullet per video or per distinct claim]
@@ -53,7 +63,7 @@ Write a Notion page body in this exact structure (markdown):
 ## Filtered out
 {filtered_out_block}
 
-Do not invent claims not present in the transcripts. If a number or fact is unclear, say so rather than guessing."""
+Do not invent claims not present in the transcripts. If a number or fact is unclear, say so rather than guessing. Never use em dashes anywhere in the page; use commas, periods, colons, or parentheses instead."""
 
 EPISODE_PROMPT = """You are writing a Notion page summary for a MacroVoices podcast episode, for Elena's rolling macro investment thesis.
 
@@ -66,7 +76,11 @@ Write the page body in this exact structure (markdown), matching the depth and s
 Macro scoreboard (week-over-week, gray-colored bullets, use <span color="gray">...</span> for each line)
 Key near-term macro catalysts they flag
 ## What this episode is really about (plain English)
-[2-3 sentences]
+[2-3 SHORT sentences, written like you're explaining it to a smart friend with zero finance
+background, not a research analyst. No jargon left undefined: a term like "K-shaped economy" or
+"rolling bubble" must be explained in plain words in the same sentence it's used, not just named.
+Concrete, not conceptual: say what's actually happening and why it matters, not what abstract
+framework or school of thought it represents. If a plain-language analogy exists, use it.]
 ## [Speaker]'s core thesis
 [Numbered points, each with sub-bullets, going deep on the actual argument and reasoning - not just a topic list]
 ## Bond / Fed / yield signals
@@ -78,7 +92,7 @@ Key near-term macro catalysts they flag
 ## Open questions to carry into the rolling thesis
 [Bulleted]
 
-Do not invent claims, numbers, or analysis not present in the transcript. If a number is garbled or unclear in the transcript, flag the uncertainty rather than guessing a clean value."""
+Do not invent claims, numbers, or analysis not present in the transcript. If a number is garbled or unclear in the transcript, flag the uncertainty rather than guessing a clean value. Never use em dashes anywhere in the page; use commas, periods, colons, or parentheses instead."""
 
 
 def classify_video(title: str, transcript_text: str) -> VideoClassification:
@@ -112,20 +126,22 @@ def write_digest_summary(channel_name: str, date, videos: list[dict], filtered_o
     )
     response = _client.messages.create(
         model=MODEL,
-        max_tokens=2000,
+        max_tokens=4000,
         messages=[{"role": "user", "content": prompt}],
     )
     return extract_text(response)
 
 
 def write_episode_summary(title: str, speaker: str, transcript_text: str) -> str:
-    # max_tokens raised 4000 -> 8000 on 10 Aug 2026: 4000 was silently truncating dense episodes
-    # mid-generation, dropping entire required sections (Bond/Fed signals, Bottom line, Soundbites,
-    # Open questions) -- see MV544 Viktor Shvets incident.
+    # max_tokens history: 4000 -> 8000 -> 16000 on 10 Aug 2026. 4000 was silently truncating dense
+    # episodes mid-generation (missing Bond/Fed, Bottom line, Soundbites, Open questions). 8000
+    # still wasn't enough on one run (cut off in the middle of "Open questions"). extract_text now
+    # also raises loudly on any max_tokens cutoff instead of returning partial text, so this can't
+    # silently recur even if 16000 also proves insufficient someday -- see MV544 Viktor Shvets incident.
     prompt = EPISODE_PROMPT.format(title=title, speaker=speaker, transcript=transcript_text[:100000])
     response = _client.messages.create(
         model=MODEL,
-        max_tokens=8000,
+        max_tokens=16000,
         messages=[{"role": "user", "content": prompt}],
     )
     return extract_text(response)
