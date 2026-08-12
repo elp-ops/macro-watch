@@ -84,7 +84,12 @@ def assess_materiality(new_content_summaries: list[str], current_thesis: str) ->
     new_content = "\n\n".join(new_content_summaries)
     prompt = MATERIALITY_PROMPT.format(current_thesis=current_thesis, new_content=new_content)
     response = _client.messages.create(
-        model=MODEL, max_tokens=1500, messages=[{"role": "user", "content": prompt}]
+        # max_tokens history: 1500 -> 4000 on 12 Aug 2026. Same cutoff bug already fixed twice in this
+        # file for the digest/episode writers (10 Aug); this third Claude call was missed. The thesis
+        # page has grown large enough that a full materiality check across all sections routinely
+        # exceeded 1500 output tokens (failed 10, 11, 12 Aug). See extract_text() in synthesize.py for
+        # why this fails loudly instead of shipping a partial verdict.
+        model=MODEL, max_tokens=4000, messages=[{"role": "user", "content": prompt}]
     )
     text = extract_text(response)
     if re.search(r"MATERIAL:\s*true", text, re.IGNORECASE):
