@@ -21,8 +21,8 @@ MODEL = "claude-sonnet-5"
 RICH_TEXT_MAX_CHARS = 1900  # safe margin under Notion's 2000-char rich_text content cap
 
 MATERIALITY_PROMPT = """You maintain Elena's rolling macro/crypto investment thesis. Below is the FULL current
-thesis page (Today/This Week Snapshot, Operating Thesis, Key Levels, and Decision Tree sections), followed by
-summaries of new content logged today.
+thesis page (two sections since 10 Oct 2026: "Where we are" and "Worth knowing"), followed by summaries of
+new content logged today.
 
 Current thesis (full page):
 {current_thesis}
@@ -30,17 +30,23 @@ Current thesis (full page):
 New content today:
 {new_content}
 
-Does any of this new content confirm, contradict, or add a materially new angle to ANY part of the current
-thesis above, not just the Snapshot section, but also the Operating Thesis, Key Levels, or Decision Tree
-(a contradiction can live in the deeper sections just as easily as the Snapshot; do not limit your check to
-the Snapshot bullets)? Restating something already covered does not count. If yes, respond:
+Does any of this new content confirm, contradict, or add a materially new angle to anything in the current
+thesis above (a numbered topic in "Where we are", or an item in "Worth knowing")? Restating something already
+covered does not count. If yes, respond:
 MATERIAL: true
 UPDATE:
-- <bulleted update points, in the same style as the existing snapshot, noting which section(s) are affected>
+- <bulleted update points in plain language (no unexplained jargon), noting which section/topic is affected>
 
 These sources are already vetted and trusted by Elena. Write update points as fact, the same way
 the rest of the thesis is written. Do not add credibility caveats ("low credibility", "unverified",
 "no figures given", "hedged language", etc.) or question whether a claim is confirmed.
+
+Source weighting (Elena, 10 Oct 2026), which overrides the line above where they conflict:
+- Dirk is Elena's most trusted source for Bitcoin price calls. Report his view first on any Bitcoin point.
+- Krown: whenever he contradicts Dirk, or walks back / lowers an earlier target or "must hold" level of his
+  own, add a separate bullet starting "KROWN VS DIRK:" or "KROWN BACKTRACK:" stating the earlier call, the
+  new one, and dates.
+- IvanOnTech: his specific crypto price predictions are no longer trusted; only log his general market commentary.
 
 If no:
 MATERIAL: false"""

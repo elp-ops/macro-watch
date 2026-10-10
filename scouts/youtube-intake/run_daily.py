@@ -113,7 +113,7 @@ def main() -> None:
             material_update = thesis_updater.assess_materiality(content_summaries, current_thesis)
             if material_update:
                 run_summary += (
-                    "\n\n**MATERIAL UPDATE FLAGGED (needs a manual Snapshot/Operating Thesis rewrite):**\n"
+                    "\n\n**MATERIAL UPDATE FLAGGED (needs a manual rewrite of the main thesis page):**\n"
                     + material_update
                 )
         except Exception as exc:
