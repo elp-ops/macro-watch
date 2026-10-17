@@ -206,3 +206,20 @@ def test_main_skips_materiality_check_when_nothing_logged():
     assert not mock_fetch.called
     assert not mock_assess.called
     assert mock_archive.called
+
+def test_process_channel_episode_transcript_failure_retries_next_run():
+    # 16 Oct 2026: MacroVoices #554 was marked processed with no transcript and never retried.
+    channel = config.CHANNELS[0]  # MacroVoices, episode format
+    led = ledger.Ledger({})
+    fake_entry = VideoEntry("v1", "MacroVoices #554 Real Episode", datetime.date(2026, 10, 15), "MacroVoices")
+
+    with patch("run_daily.ledger._client"), \
+         patch("run_daily.rss.fetch_recent_videos", return_value=[fake_entry]), \
+         patch("run_daily.transcript.get_transcript", return_value=TranscriptResult("v1", None, "failed")), \
+         patch("run_daily.notion_writer.create_episode_page") as mock_create:
+        summaries = run_daily.process_channel(channel, led)
+
+    assert not led.is_processed("v1")
+    assert not mock_create.called
+    assert len(summaries) == 1
+    assert "will retry" in summaries[0]["one_liner"]

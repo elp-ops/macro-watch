@@ -69,6 +69,9 @@ def call_gemini_transcript(video_id: str) -> str:
                 types.Part(text=GEMINI_TRANSCRIPT_PROMPT),
             ]
         ),
+        # Default resolution blows the 1M-token input limit on ~90 min MacroVoices episodes
+        # (16 Oct 2026). We only need the audio, so low-res frames are fine.
+        config=types.GenerateContentConfig(media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW),
     )
     return response.text
 

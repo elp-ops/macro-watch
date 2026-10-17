@@ -46,6 +46,15 @@ def process_channel(channel: "config.Channel", led: "ledger.Ledger") -> list[dic
             for video in videos:
                 result = transcript.get_transcript(video.video_id)
                 if result.text is None:
+                    if channel.format == "episode":
+                        # MacroVoices #554 was lost on 16 Oct 2026: captions weren't ready the day after
+                        # upload and it was marked processed anyway. Leave it unmarked so the next run
+                        # retries (rss.MAX_VIDEO_AGE_DAYS caps how long), and say so in the daily log.
+                        summaries.append({
+                            "one_liner": f"{channel_name}: transcript not available yet for '{video.title}', will retry next run",
+                            "content": "",
+                        })
+                        continue
                     led.mark_processed(video.video_id, "", channel=channel_name, date=date)  # flagged/skipped, don't retry forever
                     continue
                 classification = synthesize.classify_video(video.title, result.text)
